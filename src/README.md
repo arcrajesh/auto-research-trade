@@ -346,6 +346,144 @@ Any ticker supported by Yahoo Finance works. Common examples:
 
 ---
 
+## Step-by-Step: Live Trading with Alpaca API
+
+The `src/live.py` module lets you deploy your backtested strategy to paper or live markets via [Alpaca](https://alpaca.markets/).
+
+### Step 1 — Get Alpaca API keys
+
+1. Sign up at [https://alpaca.markets](https://alpaca.markets) (free).
+2. Go to **Paper Trading** → **API Keys** → Generate a new key pair.
+3. Set environment variables:
+
+```bash
+export ALPACA_API_KEY="your-api-key-here"
+export ALPACA_SECRET_KEY="your-secret-key-here"
+```
+
+> **Never commit these keys!** Use a `.env` file or your shell profile.
+
+### Step 2 — Dry run (see signals without placing orders)
+
+```bash
+uv run src/live.py --ticker AAPL --dry-run
+```
+
+Example output:
+
+```
+============================================================
+  autoresearch-trade LIVE (PAPER)
+  2025-06-30 16:05:00
+  Account equity: $100,000.00
+  Tickers: AAPL
+  MODE: DRY RUN (no orders will be placed)
+============================================================
+
+[AAPL]
+  Signal: BUY | Close: $195.20 | SMA(10): $193.50 | SMA(50): $190.80 | ATR: $3.42
+  Reason: SMA(10) crossed above SMA(50)
+  [AAPL] DRY RUN: Would BUY 292 shares @ ~$195.20
+           Stop-loss: $188.36
+```
+
+### Step 3 — Paper trade (simulated orders, no real money)
+
+```bash
+# Single ticker
+uv run src/live.py --ticker AAPL
+
+# Multiple tickers
+uv run src/live.py --ticker AAPL MSFT GOOGL TSLA NVDA
+```
+
+### Step 4 — Run continuously (daily at market close)
+
+```bash
+uv run src/live.py --ticker AAPL MSFT --loop
+```
+
+This will:
+1. Compute signals at ~4:05 PM ET each market day.
+2. Execute BUY/SELL/HOLD for each ticker.
+3. Sleep until the next market close.
+4. Repeat forever (Ctrl+C to stop).
+
+### Step 5 — Go live (real money)
+
+```bash
+# Switch to live API keys first!
+export ALPACA_API_KEY="your-LIVE-key"
+export ALPACA_SECRET_KEY="your-LIVE-secret"
+
+uv run src/live.py --ticker AAPL --live
+```
+
+> You get a 5-second countdown warning before live orders are placed.
+
+### How it works (architecture)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    src/live.py                           │
+├─────────────────────────────────────────────────────────┤
+│  1. Fetch latest bars (yfinance)                        │
+│  2. Compute indicators (same as strategy.py)            │
+│     - SMA(10), SMA(50) crossover detection              │
+│     - ATR(14) for position sizing & stop-loss           │
+│  3. Generate signal: BUY / SELL / HOLD                  │
+│  4. Check current Alpaca position                       │
+│  5. Execute via Alpaca Trading API                      │
+│     - Market orders with day time-in-force              │
+│     - Position sizing: 2% equity risk per trade         │
+│     - Trailing stop based on ATR                        │
+└─────────────────────────────────────────────────────────┘
+```
+
+### CLI reference
+
+```
+uv run src/live.py [OPTIONS]
+
+Options:
+  --ticker TICKER [TICKER ...]   Symbols to trade (default: AAPL)
+  --live                         Use real money (default: paper)
+  --dry-run                      Show signals without placing orders
+  --loop                         Run continuously at market close
+```
+
+### Example: Full workflow from research to live
+
+```bash
+# 1. Backtest and iterate (research phase)
+git checkout -b autoresearch/my-strategy
+# ... edit strategy.py, run backtest, keep/discard ...
+
+# 2. Validate on test split (out-of-sample)
+uv run python -c "
+from src.backtest import run_backtest, print_summary
+from src.strategy import TradingStrategy
+for t in ['AAPL', 'MSFT', 'GOOGL']:
+    m, s = run_backtest(TradingStrategy, ticker=t, split='test')
+    print(f'{t}: score={s:.4f}, sharpe={m[\"sharpe\"]:.4f}, dd={m[\"max_drawdown\"]:.4f}')
+"
+
+# 3. Paper trade for a week to verify execution
+export ALPACA_API_KEY="pk_paper_xxx"
+export ALPACA_SECRET_KEY="sk_paper_xxx"
+uv run src/live.py --ticker AAPL MSFT GOOGL --loop
+
+# 4. Review paper results in Alpaca dashboard
+#    https://app.alpaca.markets/paper/dashboard/overview
+
+# 5. Go live when confident
+export ALPACA_API_KEY="pk_live_xxx"
+export ALPACA_SECRET_KEY="sk_live_xxx"
+uv run src/live.py --ticker AAPL MSFT GOOGL --live --loop
+```
+
+---
+
 ## Troubleshooting
 
 | Problem | Solution |
